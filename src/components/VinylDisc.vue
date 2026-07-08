@@ -590,32 +590,52 @@ const shouldWobble = computed(
   pointer-events: none;
 }
 
-/* ─── Vinyl disc ─── */
+/* ─── Vinyl disc ───
+   The spin animation lives entirely on `.vinyl.spinning` rather than
+   being declared at idle and paused via `animation-play-state`. The
+   earlier pattern (base = running animation + paused, .spinning =
+   running + `will-change: transform`) was unreliable on Windows
+   Chromium because the play-state flip and the will-change layer
+   promotion fired in the same style recalc — the compositor allocated
+   the layer at the exact instant play-state went `paused→running`, and
+   the first frame of the rotation was silently dropped, so users on
+   Windows saw a frozen disc on the first press of Play. Toggling the
+   `animation` rule itself (rather than play-state) restarts the
+   keyframe sequence on a fresh style recalc, and `transform:
+   translateZ(0)` claims a dedicated GPU layer immediately without
+   the dynamic-evaluation race that `will-change: transform` triggers
+   on Windows. The disc is rotationally symmetric, so the reset-to-zero
+   between pause/play reads as a clean start instead of a snap. */
 .vinyl {
   position: relative;
   width: var(--vinyl-size);
   height: var(--vinyl-size);
   border-radius: 50%;
-  animation: vinyl-spin 6s linear infinite;
-  animation-play-state: paused;
   flex-shrink: 0;
-  /* Note: `will-change: transform` is NOT set on the base .vinyl — it
-     would keep an idle GPU layer alive. See .vinyl.spinning below for
-     the conditional hint. */
+  /* `contain: paint` keeps the disc's repaints from spilling out into
+     ancestors (relevant on Windows Chromium, where a rotating element
+     can intermitently bleed into the plinth-top layer above it). The
+     pseudo `.platter::before` halo and the `.vinyl-shadow` sibling
+     aren't affected — they're either outside the disc's box or live as
+     siblings, not descendants. */
+  contain: paint;
 }
 
 .vinyl.spinning {
-  animation-play-state: running;
-  /* Promote to a dedicated GPU layer ONLY while actually spinning. While
-     idle, the disc lives in the document flow without a dedicated layer;
-     when the keyframe rotation kicks in we hand it its own compositing
-     layer so the rotation animates smoothly on Windows Chromium. */
-  will-change: transform;
+  /* Whole animation declared here — toggling the entire `animation`
+     shorthand (rather than `animation-play-state`) restarts the
+     keyframe sequence deterministically per class change. */
+  animation: vinyl-spin 6s linear infinite;
+  /* `translateZ(0)` forces an immediate, stable GPU layer — an
+     alternative to `will-change: transform` that's safer on Windows
+     Chromium, where `will-change` allocation racing against a class
+     swap can cause that first-frame-drop regression. */
+  transform: translateZ(0);
 }
 
 @keyframes vinyl-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from { transform: rotate(0deg) translateZ(0); }
+  to { transform: rotate(360deg) translateZ(0); }
 }
 
 .disc {
